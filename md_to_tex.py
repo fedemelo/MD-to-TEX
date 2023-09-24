@@ -1,6 +1,8 @@
 import re
 import shutil
 from typing import Tuple
+from text_unidecode import unidecode
+
 
 def md_to_tex(file_path: str) -> None:
     """
@@ -113,8 +115,8 @@ def parse_char(text: str, offset: int) -> Tuple[str, int]:
         case r"!":
             add_to_tex, offset = check_if_image(text, offset)
 
-        # case r"[":
-            # add_to_tex, offset = parse_link(text, offset)
+        case r"[":
+            add_to_tex, offset = check_if_link(text, offset)
 
         # case r"`":
             # add_to_tex, offset = parse_code(text, offset)
@@ -131,16 +133,21 @@ def parse_char(text: str, offset: int) -> Tuple[str, int]:
 
 def check_if_math(text: str, offset: int) -> str:
 
-    # It is math if the character immediately after $ or $$ is not whitespace:
-    if not text[offset+1].isspace():
-        if text[offset+1] == "$":
-            add_to_tex, offset = parse_display_math(text[offset:])
+    # It is math if the character immediately after $ is not whitespace:
+    try:
+        if not text[offset+1].isspace():
+            if text[offset+1] == "$" and not text[offset+2].isspace():
+                add_to_tex, offset = parse_display_math(text[offset:])
+            else:
+                add_to_tex, offset = parse_inline_math(text[offset:])
         else:
-            add_to_tex, offset = parse_inline_math(text[offset:])
-
-    else:
+            add_to_tex = "$"
+            offset = 1
+    except IndexError:
         add_to_tex = "$"
         offset = 1
+
+    
 
     return add_to_tex, offset
 
@@ -196,7 +203,7 @@ def parse_bold_or_italic(text: str, offset: int) -> str:
         case 3 | 0:
             add_to_tex = r"\textit{\textbf{"+body_as_tex+r"}}"
 
-    return add_to_tex, end_offset
+    return add_to_tex, end_offset-1
 
 
 def check_if_title_or_tag(text: str, offset: int) -> str:
@@ -233,11 +240,12 @@ def parse_title(text: str) -> str:
     offset += 1
     end_of_line = text.find("\n", offset)
 
-    body: str = text[offset:end_of_line]
+    title: str = text[offset:end_of_line]
 
-    body_as_tex = TEXify_block(body)
+    title_as_tex = TEXify_block(title)
 
-    add_to_tex = TEX_macro("level", [number_of_hashtags, body_as_tex])+"\n"
+    add_to_tex = TEX_macro("level", [number_of_hashtags, title_as_tex])+"\n"
+    add_to_tex += r"\label{sec:"+normalize_text(title_as_tex)+"}"+"\n"
 
     return add_to_tex, end_of_line
 
@@ -259,11 +267,14 @@ def parse_tag(text: str) -> str:
 def check_if_list(text: str, offset: int) -> str:
 
     # It is a list if the character before "-" is \n and after is a space
-    if text[offset-1] == "\n" and text[offset+1] in (" "):
-        # The text is given as "\n- Item..."
-        add_to_tex, local_offset = parse_list(text[offset-1:])
-
-    else:
+    try:
+        if text[offset-1] == "\n" and text[offset+1] in (" "):
+            # The text is given as "\n- Item..."
+            add_to_tex, local_offset = parse_list(text[offset-1:])
+        else:
+            add_to_tex = "-"
+            local_offset = 1
+    except IndexError:
         add_to_tex = "-"
         local_offset = 1
 
@@ -281,7 +292,8 @@ def parse_list(text: str) -> str:
            text[offset] == r"-" and
            text[offset+1] == " "):
         next_newline = text.find("\n", offset+1)
-        item = TEXify_block(text[offset+2:next_newline])
+        item_text = text[offset+2:next_newline]
+        item = TEXify_block(item_text)
         items.append(f"\\item {item}\n")
         offset = next_newline+1
 
@@ -323,6 +335,47 @@ def parse_image(text: str) -> str:
 
     return add_to_tex, end_of_alt_text+2
 
+
+def check_if_link(text: str, offset: int) -> str:
+
+    # It is a title if the character after is also "["
+    if text[offset+1] == "[":
+        add_to_tex, local_offset = parse_link(text[offset:])
+
+    else:
+        add_to_tex = "["
+        local_offset = 1
+
+    return add_to_tex, offset+local_offset
+
+
+def parse_link(text: str) -> str:
+    """
+    E.g. "[[document#section|link]]"
+    """
+    end_of_link_ref = text.find(r"|")
+    start_of_link_ref = text.find(r"#")
+    link_ref = text[start_of_link_ref+1:end_of_link_ref]
+
+    end_of_link = text.find(r"]]")
+    link_text = text[end_of_link_ref+1:end_of_link]
+
+    link_ref_as_tex = TEXify_block(link_ref)
+    ref_to_label = "sec:"+normalize_text(link_ref_as_tex)
+
+    add_to_tex = r"\hyperref["+ref_to_label+"]{"+link_text+"}"
+
+    return add_to_tex, end_of_link+2
+
+
+def normalize_text(s: str) -> str:
+    """
+    Returns the text normalized.
+    """
+    sin_acentos = unidecode(s.strip()) 
+    underscore_por_espacios_y_puntuacion = re.sub(r'\W+','_', sin_acentos)
+    return underscore_por_espacios_y_puntuacion.lower()
+    
 
 def TEX_macro(name: str, params: list = [], optional_params: list = []) -> str:
     """
