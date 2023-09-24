@@ -29,7 +29,7 @@ def parse_mkdown(text: str, title: str) -> str:
 
     while position < len(text):
 
-        add_to_tex, offset = parse_char(text[position:])
+        add_to_tex, offset = parse_char(text, position)
 
         tex_text += add_to_tex
         position += offset
@@ -46,7 +46,7 @@ def TEXify_block(text: str) -> str:
 
     while position < len(text):
 
-        add_to_tex, offset = parse_char(text[position:])
+        add_to_tex, offset = parse_char(text, position)
 
         tex_text += add_to_tex
         position += offset
@@ -67,45 +67,51 @@ def initial_tex_text(titulo: str) -> str:
 \begin{center}
 {\Large\bfseries\sffamily \titulo}
 \end{center}
+
 """
 
 
-def parse_char(text: str) -> Tuple[str, int]:
+def parse_char(text: str, position: int) -> Tuple[str, int]:
     """
     Parses a block of text and returns the corresponding LaTeX code and the offset.
+
+    If the character is not part of the Markdown syntax, it is returned as is.
+
+    If the character is part of the Markdown syntax, the corresponding function is called.
     """
 
     if not text:
         return "", 1
 
-    char: str = text[0]
+    offset: int = position
+    char: str = text[offset]
     add_to_tex: str = ""
 
     match char:
 
-        case r"#":
-            add_to_tex, offset = parse_title_or_tag(text)
+        case r"$":
+            add_to_tex, offset = check_if_math(text, offset)
 
         case r"*":
-            add_to_tex, offset = parse_bold_or_italic(text)
+            add_to_tex, offset = parse_bold_or_italic(text, offset)
 
-        case r"-":
-            add_to_tex, offset = parse_list(text)
-
-        case r"$":
-            add_to_tex, offset = parse_math(text)
+        case r"#":
+            add_to_tex, offset = check_if_title_or_tag(text, offset)
 
         case r"!":
-            add_to_tex, offset = parse_image(text)
+            add_to_tex, offset = parse_image(text, offset)
+
+        # case r"-":
+        #     add_to_tex, offset = parse_list(text, offset)
 
         # case r"[":
-            # add_to_tex, offset = parse_link(text)
+            # add_to_tex, offset = parse_link(text, offset)
 
         # case r"`":
-            # add_to_tex, offset = parse_code(text)
+            # add_to_tex, offset = parse_code(text, offset)
 
         # case "0"|"1"|"2"|"3"|"4"|"5"|"6"|"7"|"8"|"9":
-            # add_to_tex, offset = parse_possible_numbered_list(text)
+            # add_to_tex, offset = parse_possible_numbered_list(text, offset)
 
         case _:    # Not MD syntax
             add_to_tex = char
@@ -114,18 +120,26 @@ def parse_char(text: str) -> Tuple[str, int]:
     return add_to_tex, offset
 
 
-def parse_title_or_tag(text: str) -> str:
+def check_if_title_or_tag(text: str, offset: int) -> str:
 
-    next_char: str = text[1]
-    add_to_tex, offset = parse_title(
-        text) if next_char == r" " or next_char == r"#" else parse_tag(text)
+    # It is a title if the character before is \n and after is a space
+    if text[offset-1] == "\n" and text[offset+1] == r" ":
+        add_to_tex, offset = parse_title(text[offset:])
+    
+    # It is a tag if the character before is some whitespace and after is a letter
+    elif text[offset-1].isspace() and text[offset+1].isalpha():
+        add_to_tex, offset = parse_tag(text[offset:])
+
+    else:
+        add_to_tex = "#"
+        offset = 1
 
     return add_to_tex, offset
 
 
 def parse_tag(text: str) -> str:
     """
-    E.g. #tag1 ...
+    E.g. "#tag1 "
     Tags are turned into comments 
     """
     offset = re.search(r'\s', text).start()
@@ -139,7 +153,7 @@ def parse_tag(text: str) -> str:
 
 def parse_title(text: str) -> str:
     """
-    E.g. # Title 1, ## Title 2, ### Title 3, etc.
+    E.g. "# Title 1", "## Title 2", "### Title 3"
     """
 
     number_of_hashtags: int = 0
@@ -163,9 +177,9 @@ def parse_title(text: str) -> str:
     return add_to_tex, end_of_line
 
 
-def parse_bold_or_italic(text: str) -> str:
+def parse_bold_or_italic(text: str, offset: int) -> str:
     """
-    E.g. *italic*, **bold**, ***bold and italic***
+    E.g. "*italic*", "**bold**", "***bold and italic***"
     """
     number_of_stars: int = 0
     offset: int = 0
@@ -193,9 +207,9 @@ def parse_bold_or_italic(text: str) -> str:
     return add_to_tex, end_offset
 
 
-def parse_list(text: str) -> str:
+def parse_list(text: str, offset: int) -> str:
     """
-    E.g. - Item 1\n- Item 2
+    E.g. "- Item 1\n- Item 2"
     """
     if text[1] != r" ":
         return "-", 1
@@ -217,22 +231,21 @@ def parse_list(text: str) -> str:
     return add_to_tex, offset
 
 
-def parse_math(text: str) -> str:
-    """
-    E.g. $x^2$ or $$A' = \Omega \setminus A\\A' = \{x \in \Omega | x \notin A\}$$
-    """
+def check_if_math(text: str, offset: int) -> str:
 
-    if text[1] != r"$":
-        add_to_tex, offset = parse_inline_math(text)
-    else:
-        add_to_tex, offset = parse_display_math(text)
-
-    return add_to_tex, offset
+    # It is math if the character immediately after $ or $$ is not whitespace:
+    if not text[offset+1].isspace():
+        if text[offset+1] == "$":
+            add_to_tex, offset = parse_display_math(text[offset:])
+        else:
+            add_to_tex, offset = parse_inline_math(text[offset:])
+    
+    return add_to_tex, offset 
 
 
 def parse_inline_math(text: str) -> str:
     """
-    E.g. $x^2$
+    E.g. "$x^2$"
     """
     re_match = re.search(r'(?<!\\)\$', text[1:])
     end_of_block = re_match.end()
@@ -245,7 +258,7 @@ def parse_inline_math(text: str) -> str:
 
 def parse_display_math(text: str) -> str:
     """
-    E.g. $$A' = \Omega \setminus A\\A' = \{x \in \Omega | x \notin A\}$$
+    E.g. "$$A' = \Omega \setminus A\\A' = \{x \in \Omega | x \notin A\}$$"
     """
     end_of_block = re.search(r'(?<!\\)\$\$', text[2:]).end()
     body: str = text[2:end_of_block]
