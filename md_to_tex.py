@@ -24,29 +24,32 @@ def parse_mkdown(text: str, title: str) -> str:
     """
     # Temporal complexity: O(n)
 
-    position: int = 0
+    text = "\n" + text + "\n"
+
+    position: int = 1
     tex_text: str = initial_tex_text(title)
 
     while position < len(text):
 
-        add_to_tex, offset = parse_char(text, position)
+        add_to_tex, offset = parse_char(text[position-1:], 1)
 
         tex_text += add_to_tex
         position += offset
 
+    tex_text += "\n" + r"\end{document}"
     return tex_text
 
 
-def TEXify_block(text: str) -> str:
+def TEXify_block(block: str) -> str:
     """
     Parses a block of text and returns the corresponding LaTeX code.
     """
     position: int = 0
     tex_text: str = ""
 
-    while position < len(text):
+    while position < len(block):
 
-        add_to_tex, offset = parse_char(text, position)
+        add_to_tex, offset = parse_char(block, position)
 
         tex_text += add_to_tex
         position += offset
@@ -56,7 +59,8 @@ def TEXify_block(text: str) -> str:
 
 def initial_tex_text(titulo: str) -> str:
 
-    return r"""\documentclass{fmbnotes}
+    return r"""% !TeX spellcheck = es_ES
+\documentclass{fmbnotes}
 \usepackage{fmbmath}
 
 \begin{document}
@@ -65,13 +69,13 @@ def initial_tex_text(titulo: str) -> str:
 \portada{\titulo} 
 
 \begin{center}
-{\Large\bfseries\sffamily \titulo}
+    {\Large\bfseries\sffamily \titulo}
 \end{center}
 
 """
 
 
-def parse_char(text: str, position: int) -> Tuple[str, int]:
+def parse_char(text: str, offset: int) -> Tuple[str, int]:
     """
     Parses a block of text and returns the corresponding LaTeX code and the offset.
 
@@ -80,10 +84,6 @@ def parse_char(text: str, position: int) -> Tuple[str, int]:
     If the character is part of the Markdown syntax, the corresponding function is called.
     """
 
-    if not text:
-        return "", 1
-
-    offset: int = position
     char: str = text[offset]
     add_to_tex: str = ""
 
@@ -98,11 +98,11 @@ def parse_char(text: str, position: int) -> Tuple[str, int]:
         case r"#":
             add_to_tex, offset = check_if_title_or_tag(text, offset)
 
-        case r"!":
-            add_to_tex, offset = parse_image(text, offset)
+        # case r"!":
+        #     add_to_tex, offset = parse_image(text, offset)
 
-        # case r"-":
-        #     add_to_tex, offset = parse_list(text, offset)
+        case r"-":
+            add_to_tex, offset = check_if_list(text, offset)
 
         # case r"[":
             # add_to_tex, offset = parse_link(text, offset)
@@ -123,18 +123,18 @@ def parse_char(text: str, position: int) -> Tuple[str, int]:
 def check_if_title_or_tag(text: str, offset: int) -> str:
 
     # It is a title if the character before is \n and after is a space
-    if text[offset-1] == "\n" and text[offset+1] == r" ":
-        add_to_tex, offset = parse_title(text[offset:])
+    if text[offset-1] == "\n" and text[offset+1] in (" ", "#"):
+        add_to_tex, local_offset = parse_title(text[offset:])
     
     # It is a tag if the character before is some whitespace and after is a letter
     elif text[offset-1].isspace() and text[offset+1].isalpha():
-        add_to_tex, offset = parse_tag(text[offset:])
+        add_to_tex, local_offset = parse_tag(text[offset:])
 
     else:
         add_to_tex = "#"
-        offset = 1
+        local_offset = 1
 
-    return add_to_tex, offset
+    return add_to_tex, offset+local_offset
 
 
 def parse_tag(text: str) -> str:
@@ -172,7 +172,7 @@ def parse_title(text: str) -> str:
 
     body_as_tex = TEXify_block(body)
 
-    add_to_tex = TEX_macro("level", [number_of_hashtags, body_as_tex])
+    add_to_tex = TEX_macro("level", [number_of_hashtags, body_as_tex])+"\n"
 
     return add_to_tex, end_of_line
 
@@ -182,7 +182,6 @@ def parse_bold_or_italic(text: str, offset: int) -> str:
     E.g. "*italic*", "**bold**", "***bold and italic***"
     """
     number_of_stars: int = 0
-    offset: int = 0
     char: str = text[offset]
     while char == r"*":
         number_of_stars += 1
@@ -201,34 +200,46 @@ def parse_bold_or_italic(text: str, offset: int) -> str:
             add_to_tex = r"\textit{"+body_as_tex+r"}"
         case 2:
             add_to_tex = r"\textbf{"+body_as_tex+r"}"
-        case 3:
+        case 3|0:
             add_to_tex = r"\textit{\textbf{"+body_as_tex+r"}}"
 
     return add_to_tex, end_offset
 
 
-def parse_list(text: str, offset: int) -> str:
-    """
-    E.g. "- Item 1\n- Item 2"
-    """
-    if text[1] != r" ":
-        return "-", 1
+def check_if_list(text: str, offset: int) -> str:
 
-    items: list = []
-    offset: int = 0
-    while text[offset] == r"-":
-        next_newline = text.find(r"\n")
-        item = TEXify_block(text[offset:next_newline])
-        items.append(TEX_macro(item)+item[1:])
+    # It is a list if the character before "-" is \n and after is a space
+    if text[offset-1] == "\n" and text[offset+1] in (" "):
+        # The text is given as "\n- Item..."
+        add_to_tex, local_offset = parse_list(text[offset-1:])
+    
+    else:
+        add_to_tex = "-"
+        local_offset = 1
+
+    return add_to_tex, offset+local_offset
+
+
+def parse_list(text: str) -> str:
+    """
+    E.g. "\n- Item 1\n- Item 2"
+    """
+
+    items = []
+    offset = 1
+    while (text[offset-1] == "\n" and
+           text[offset] == r"-" and
+           text[offset+1] == " "):
+        next_newline = text.find("\n", offset+1)
+        item = TEXify_block(text[offset+2:next_newline])
+        items.append(f"\\item {item}\n")
         offset = next_newline+1
 
-    itemize_body = ""
-    for item in items:
-        itemize_body += "    " + item + "\n"
+    itemize_body = "".join(items)
 
     add_to_tex = TEX_environment("itemize", [], itemize_body[:-1])
 
-    return add_to_tex, offset
+    return add_to_tex, offset-2
 
 
 def check_if_math(text: str, offset: int) -> str:
@@ -239,8 +250,12 @@ def check_if_math(text: str, offset: int) -> str:
             add_to_tex, offset = parse_display_math(text[offset:])
         else:
             add_to_tex, offset = parse_inline_math(text[offset:])
+
+    else:
+        add_to_tex = "$"
+        offset = 1
     
-    return add_to_tex, offset 
+    return add_to_tex, offset
 
 
 def parse_inline_math(text: str) -> str:
@@ -263,7 +278,7 @@ def parse_display_math(text: str) -> str:
     end_of_block = re.search(r'(?<!\\)\$\$', text[2:]).end()
     body: str = text[2:end_of_block]
 
-    add_to_tex = TEX_environment("equation", [], body)
+    add_to_tex = TEX_environment("equation*", [], body)
 
     return add_to_tex, end_of_block+2
 
@@ -314,7 +329,7 @@ def TEX_environment(name: str, params: list, body: str, optional_params: list = 
     environment += indent(body)
     environment += "\n"
 
-    environment += r"\end{"+name+"}"
+    environment += r"\end{"+name+"}"+ "\n"
 
     return environment
 
