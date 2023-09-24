@@ -1,6 +1,6 @@
 import re
+import shutil
 from typing import Tuple
-
 
 def md_to_tex(file_path: str) -> None:
     """
@@ -11,7 +11,16 @@ def md_to_tex(file_path: str) -> None:
     md_file.close()
 
     filename = file_path.split("\\")[-1][:-3]
-    tex_path = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\LaTeX\\"+filename+".tex"
+
+    # TODO: Change this to the actual path
+    root_path = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\LaTeX\matematica\grafos\grafos"
+    tex_path = root_path+".tex"
+    
+    backup_path = root_path+"_backup.tex"
+    try:
+        shutil.copy2(tex_path, backup_path)
+    except FileNotFoundError:
+        pass
 
     with open(tex_path, "w") as tex_file:
         tex_file.write(parse_mkdown(md_text, filename))
@@ -98,11 +107,11 @@ def parse_char(text: str, offset: int) -> Tuple[str, int]:
         case r"#":
             add_to_tex, offset = check_if_title_or_tag(text, offset)
 
-        # case r"!":
-        #     add_to_tex, offset = parse_image(text, offset)
-
         case r"-":
             add_to_tex, offset = check_if_list(text, offset)
+
+        case r"!":
+            add_to_tex, offset = check_if_image(text, offset)
 
         # case r"[":
             # add_to_tex, offset = parse_link(text, offset)
@@ -120,12 +129,82 @@ def parse_char(text: str, offset: int) -> Tuple[str, int]:
     return add_to_tex, offset
 
 
+def check_if_math(text: str, offset: int) -> str:
+
+    # It is math if the character immediately after $ or $$ is not whitespace:
+    if not text[offset+1].isspace():
+        if text[offset+1] == "$":
+            add_to_tex, offset = parse_display_math(text[offset:])
+        else:
+            add_to_tex, offset = parse_inline_math(text[offset:])
+
+    else:
+        add_to_tex = "$"
+        offset = 1
+
+    return add_to_tex, offset
+
+
+def parse_inline_math(text: str) -> str:
+    """
+    E.g. "$x^2$"
+    """
+    re_match = re.search(r'(?<!\\)\$', text[1:])
+    end_of_block = re_match.end()
+    body: str = text[1:end_of_block]
+
+    add_to_tex = r"\("+body+r"\)"
+
+    return add_to_tex, end_of_block+1
+
+
+def parse_display_math(text: str) -> str:
+    """
+    E.g. "$$A' = \Omega \setminus A\\A' = \{x \in \Omega | x \notin A\}$$"
+    """
+    end_of_block = re.search(r'(?<!\\)\$\$', text[2:]).end()
+    body: str = text[2:end_of_block]
+
+    add_to_tex = TEX_environment("equation*", [], body)
+
+    return add_to_tex, end_of_block+2
+
+
+def parse_bold_or_italic(text: str, offset: int) -> str:
+    """
+    E.g. "*italic*", "**bold**", "***bold and italic***"
+    """
+    number_of_stars: int = 0
+    char: str = text[offset]
+    while char == r"*":
+        number_of_stars += 1
+        offset += 1
+        char = text[offset]
+
+    match = re.search(r'(?<!\\)\*+', text[offset:])
+    end_of_block = match.start()+offset
+    end_offset = match.end()+offset
+    body: str = text[offset:end_of_block]
+
+    body_as_tex = TEXify_block(body)
+
+    match number_of_stars % 4:
+        case 1:
+            add_to_tex = r"\textit{"+body_as_tex+r"}"
+        case 2:
+            add_to_tex = r"\textbf{"+body_as_tex+r"}"
+        case 3 | 0:
+            add_to_tex = r"\textit{\textbf{"+body_as_tex+r"}}"
+
+    return add_to_tex, end_offset
+
+
 def check_if_title_or_tag(text: str, offset: int) -> str:
 
     # It is a title if the character before is \n and after is a space
     if text[offset-1] == "\n" and text[offset+1] in (" ", "#"):
         add_to_tex, local_offset = parse_title(text[offset:])
-    
+
     # It is a tag if the character before is some whitespace and after is a letter
     elif text[offset-1].isspace() and text[offset+1].isalpha():
         add_to_tex, local_offset = parse_tag(text[offset:])
@@ -135,20 +214,6 @@ def check_if_title_or_tag(text: str, offset: int) -> str:
         local_offset = 1
 
     return add_to_tex, offset+local_offset
-
-
-def parse_tag(text: str) -> str:
-    """
-    E.g. "#tag1 "
-    Tags are turned into comments 
-    """
-    offset = re.search(r'\s', text).start()
-
-    body: str = text[1:offset]
-
-    add_to_tex = r"%"+body+"\n"
-
-    return add_to_tex, offset
 
 
 def parse_title(text: str) -> str:
@@ -177,33 +242,18 @@ def parse_title(text: str) -> str:
     return add_to_tex, end_of_line
 
 
-def parse_bold_or_italic(text: str, offset: int) -> str:
+def parse_tag(text: str) -> str:
     """
-    E.g. "*italic*", "**bold**", "***bold and italic***"
+    E.g. "#tag1 "
+    Tags are turned into comments 
     """
-    number_of_stars: int = 0
-    char: str = text[offset]
-    while char == r"*":
-        number_of_stars += 1
-        offset += 1
-        char = text[offset]
+    offset = re.search(r'\s', text).start()
 
-    match = re.search(r'(?<!\\)\*+', text[offset:])
-    end_of_block = match.start()+offset
-    end_offset = match.end()+offset
-    body: str = text[offset:end_of_block]
+    body: str = text[1:offset]
 
-    body_as_tex = TEXify_block(body)
+    add_to_tex = r"%"+body+"\n"
 
-    match number_of_stars % 4:
-        case 1:
-            add_to_tex = r"\textit{"+body_as_tex+r"}"
-        case 2:
-            add_to_tex = r"\textbf{"+body_as_tex+r"}"
-        case 3|0:
-            add_to_tex = r"\textit{\textbf{"+body_as_tex+r"}}"
-
-    return add_to_tex, end_offset
+    return add_to_tex, offset
 
 
 def check_if_list(text: str, offset: int) -> str:
@@ -212,7 +262,7 @@ def check_if_list(text: str, offset: int) -> str:
     if text[offset-1] == "\n" and text[offset+1] in (" "):
         # The text is given as "\n- Item..."
         add_to_tex, local_offset = parse_list(text[offset-1:])
-    
+
     else:
         add_to_tex = "-"
         local_offset = 1
@@ -242,56 +292,32 @@ def parse_list(text: str) -> str:
     return add_to_tex, offset-2
 
 
-def check_if_math(text: str, offset: int) -> str:
+def check_if_image(text: str, offset: int) -> str:
 
-    # It is math if the character immediately after $ or $$ is not whitespace:
-    if not text[offset+1].isspace():
-        if text[offset+1] == "$":
-            add_to_tex, offset = parse_display_math(text[offset:])
-        else:
-            add_to_tex, offset = parse_inline_math(text[offset:])
+    if offset+2 >= len(text):
+        return "!", 1
+
+    # It is an image if the character before "!" is "\n" and after is "[["
+    elif text[offset-1] == "\n" and text[offset+1:offset+3] == r"[[":
+        add_to_tex, local_offset = parse_image(text[offset:])
+
+    
 
     else:
-        add_to_tex = "$"
-        offset = 1
-    
-    return add_to_tex, offset
+        add_to_tex = "!"
+        local_offset = 1
 
-
-def parse_inline_math(text: str) -> str:
-    """
-    E.g. "$x^2$"
-    """
-    re_match = re.search(r'(?<!\\)\$', text[1:])
-    end_of_block = re_match.end()
-    body: str = text[1:end_of_block]
-
-    add_to_tex = r"\("+body+r"\)"
-
-    return add_to_tex, end_of_block+1
-
-
-def parse_display_math(text: str) -> str:
-    """
-    E.g. "$$A' = \Omega \setminus A\\A' = \{x \in \Omega | x \notin A\}$$"
-    """
-    end_of_block = re.search(r'(?<!\\)\$\$', text[2:]).end()
-    body: str = text[2:end_of_block]
-
-    add_to_tex = TEX_environment("equation*", [], body)
-
-    return add_to_tex, end_of_block+2
+    return add_to_tex, offset+local_offset
 
 
 def parse_image(text: str) -> str:
     """
-    E.g. ![alt text](image.png)
+    E.g. ![[alt text]]
     """
-    if text[1] != r"[" or text[2] != r"[":
-        return "!", 1
-
     end_of_alt_text = text.find(r"]]")
     filename = text[3:end_of_alt_text]
+    has_size = text.find(r"|")
+    filename = filename if has_size == -1 else filename[:has_size]
 
     add_to_tex = TEX_image(filename)
 
@@ -329,7 +355,7 @@ def TEX_environment(name: str, params: list, body: str, optional_params: list = 
     environment += indent(body)
     environment += "\n"
 
-    environment += r"\end{"+name+"}"+ "\n"
+    environment += r"\end{"+name+"}" + "\n"
 
     return environment
 
@@ -337,17 +363,19 @@ def TEX_environment(name: str, params: list, body: str, optional_params: list = 
 def TEX_image(filename: str, caption: str = "") -> str:
     s = "\n" + r"""\begin{figure}[h]
     \centering
-    \includegraphics[0.6\textwidth]{./img/"""+filename+"}"+"\n"
+    \includegraphics[width=0.6\textwidth]{./img/"""+filename+"}"+"\n"
 
-    if caption != "":
-        s += r"%TODO: \caption{\centering Falta caption }"+"\n"
+    if caption:
+        s += " "*4 + r"\caption{\centering "+caption+"}"+"\n"
     else:
-        s += r"\caption{\centering "+caption+"}\n"
+        s += " "*4 + r"\caption{\centering \textcolor{red}{TODO: "+filename.replace("_", " ")+r"}}"+"\n"
 
     extension_pos = filename.find(".")
-    s += r"\label{fig:"+filename[:extension_pos]+"}\n"
+    s += " "*4 + r"\label{fig:"+filename[:extension_pos]+"}\n"
 
     s += r"\end{figure}" + "\n"
+
+    return s
 
 
 def indent(text: str, number_of_spaces: int = 4) -> str:
