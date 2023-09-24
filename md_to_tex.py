@@ -40,13 +40,13 @@ def parse_mkdown(text: str, title: str) -> str:
     tex_text: str = initial_tex_text(title)
 
     tex_text += TEXify_block(text) + "\n" + r"\end{document}"
-    
+
     return tex_text
 
 
 def TEXify_block(block: str) -> str:
     """
-    Parses a block of text and returns the corresponding LaTeX code.
+    Parses a block of Markdown text and returns the corresponding LaTeX code.
     """
     position: int = 1
     tex_text: str = ""
@@ -59,7 +59,7 @@ def TEXify_block(block: str) -> str:
         tex_text += add_to_tex
         position += offset
 
-    return tex_text
+    return tex_text.strip()
 
 
 def initial_tex_text(titulo: str) -> str:
@@ -359,7 +359,7 @@ def parse_link(text: str) -> str:
 
     add_to_tex = r"\hyperref["+ref_to_label+"]{"+link_text+"}"
 
-    return add_to_tex, end_of_link+2
+    return add_to_tex, end_of_link+1
 
 
 def normalize_text(s: str) -> str:
