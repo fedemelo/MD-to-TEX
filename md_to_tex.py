@@ -37,17 +37,10 @@ def parse_mkdown(text: str, title: str) -> str:
 
     text = "\n" + text + "\n"
 
-    position: int = 1
     tex_text: str = initial_tex_text(title)
 
-    while position < len(text):
-
-        add_to_tex, offset = parse_char(text[position-1:], 1)
-
-        tex_text += add_to_tex
-        position += offset
-
-    tex_text += "\n" + r"\end{document}"
+    tex_text += TEXify_block(text) + "\n" + r"\end{document}"
+    
     return tex_text
 
 
@@ -55,12 +48,13 @@ def TEXify_block(block: str) -> str:
     """
     Parses a block of text and returns the corresponding LaTeX code.
     """
-    position: int = 0
+    position: int = 1
     tex_text: str = ""
+    block = " " + block + " "
 
     while position < len(block):
 
-        add_to_tex, offset = parse_char(block, position)
+        add_to_tex, offset = parse_char(block[position-1:], 1)
 
         tex_text += add_to_tex
         position += offset
