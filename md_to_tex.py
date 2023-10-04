@@ -1,31 +1,28 @@
-import re
 import shutil
 from typing import Tuple
+from re import search, match, sub
 from text_unidecode import unidecode
+from TEX_lang import initial_tex_text, normalize_text, TEX_macro, TEX_environment, indent
 
 
-def md_to_tex(file_path: str) -> None:
+def md_to_tex(md_path: str, tex_path: str) -> None:
     """
     Converts a Markdown file into a LaTeX file.
     """
-    md_file = open(file_path, "r")
+    md_file = open(md_path, "r")
     md_text = md_file.read()
     md_file.close()
 
-    filename = file_path.split("\\")[-1][:-3]
+    md_filename = md_path.split("\\")[-1][:-3]
 
-    # TODO: Change this to the actual path
-    root_path = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\LaTeX\matematica\grafos\grafos"
-    tex_path = root_path+".tex"
-    
-    backup_path = root_path+"_backup.tex"
+    backup_path = "backup.tex"
     try:
         shutil.copy2(tex_path, backup_path)
     except FileNotFoundError:
         pass
 
-    with open(tex_path, "w") as tex_file:
-        tex_file.write(parse_mkdown(md_text, filename))
+    with open(tex_path, "w+") as tex_file:
+        tex_file.write(parse_mkdown(md_text, md_filename))
         tex_file.close()
 
 
@@ -62,24 +59,6 @@ def TEXify_block(block: str) -> str:
     return tex_text.strip()
 
 
-def initial_tex_text(titulo: str) -> str:
-
-    return r"""% !TeX spellcheck = es_ES
-\documentclass{fmbnotes}
-\usepackage{fmbmath}
-
-\begin{document}
-
-\newcommand*{\titulo}{"""+titulo+r"""}
-\portada{\titulo} 
-
-\begin{center}
-    {\Large\bfseries\sffamily \titulo}
-\end{center}
-
-"""
-
-
 def parse_char(text: str, offset: int) -> Tuple[str, int]:
     """
     Parses a block of text and returns the corresponding LaTeX code and the offset.
@@ -93,6 +72,9 @@ def parse_char(text: str, offset: int) -> Tuple[str, int]:
     add_to_tex: str = ""
 
     match char:
+
+        case r"%":
+            add_to_tex, offset = r"\%", 1
 
         case r"$":
             add_to_tex, offset = check_if_math(text, offset)
@@ -112,6 +94,10 @@ def parse_char(text: str, offset: int) -> Tuple[str, int]:
         case r"[":
             add_to_tex, offset = check_if_link(text, offset)
 
+        # TODO: Add support for the following syntaxes
+        case r">":
+            add_to_tex, offset = check_if_highlight(text, offset)
+
         # case r"`":
             # add_to_tex, offset = parse_code(text, offset)
 
@@ -123,6 +109,8 @@ def parse_char(text: str, offset: int) -> Tuple[str, int]:
             offset = 1
 
     return add_to_tex, offset
+
+# ========================== Math ==========================
 
 
 def check_if_math(text: str, offset: int) -> str:
@@ -141,8 +129,6 @@ def check_if_math(text: str, offset: int) -> str:
         add_to_tex = "$"
         offset = 1
 
-    
-
     return add_to_tex, offset
 
 
@@ -150,7 +136,7 @@ def parse_inline_math(text: str) -> str:
     """
     E.g. "$x^2$"
     """
-    re_match = re.search(r'(?<!\\)\$', text[1:])
+    re_match = search(r'(?<!\\)\$', text[1:])
     end_of_block = re_match.end()
     body: str = text[1:end_of_block]
 
@@ -163,12 +149,15 @@ def parse_display_math(text: str) -> str:
     """
     E.g. "$$A' = \Omega \setminus A\\A' = \{x \in \Omega | x \notin A\}$$"
     """
-    end_of_block = re.search(r'(?<!\\)\$\$', text[2:]).end()
+    end_of_block = search(r'(?<!\\)\$\$', text[2:]).end()
     body: str = text[2:end_of_block]
 
     add_to_tex = TEX_environment("equation*", [], body)
 
     return add_to_tex, end_of_block+2
+
+# ========================== Math ==========================
+# ========================== Bold or italic ==========================
 
 
 def parse_bold_or_italic(text: str, offset: int) -> str:
@@ -182,7 +171,7 @@ def parse_bold_or_italic(text: str, offset: int) -> str:
         offset += 1
         char = text[offset]
 
-    match = re.search(r'(?<!\\)\*+', text[offset:])
+    match = search(r'(?<!\\)\*+', text[offset:])
     end_of_block = match.start()+offset
     end_offset = match.end()+offset
     body: str = text[offset:end_of_block]
@@ -198,6 +187,9 @@ def parse_bold_or_italic(text: str, offset: int) -> str:
             add_to_tex = r"\textit{\textbf{"+body_as_tex+r"}}"
 
     return add_to_tex, end_offset-1
+
+# ========================== Bold or italic ==========================
+# ========================== Title or tag ==========================
 
 
 def check_if_title_or_tag(text: str, offset: int) -> str:
@@ -249,13 +241,16 @@ def parse_tag(text: str) -> str:
     E.g. "#tag1 "
     Tags are turned into comments 
     """
-    offset = re.search(r'\s', text).start()
+    offset = search(r'\s', text).start()
 
     body: str = text[1:offset]
 
     add_to_tex = r"%"+body+"\n"
 
     return add_to_tex, offset
+
+# ========================== Title or tag ==========================
+# ========================== List ==========================
 
 
 def check_if_list(text: str, offset: int) -> str:
@@ -298,6 +293,10 @@ def parse_list(text: str) -> str:
     return add_to_tex, offset-2
 
 
+# ========================== List ==========================
+# ========================== Image ==========================
+
+
 def check_if_image(text: str, offset: int) -> str:
 
     if offset+2 >= len(text):
@@ -306,8 +305,6 @@ def check_if_image(text: str, offset: int) -> str:
     # It is an image if the character before "!" is "\n" and after is "[["
     elif text[offset-1] == "\n" and text[offset+1:offset+3] == r"[[":
         add_to_tex, local_offset = parse_image(text[offset:])
-
-    
 
     else:
         add_to_tex = "!"
@@ -330,9 +327,33 @@ def parse_image(text: str) -> str:
     return add_to_tex, end_of_alt_text+2
 
 
+def TEX_image(filename: str, caption: str = "") -> str:
+    s = "\n" + r"""\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.6\textwidth]{./img/"""+filename+"}"+"\n"
+
+    if caption:
+        s += " "*4 + r"\caption{\centering "+caption+"}"+"\n"
+    else:
+        s += " "*4 + \
+            r"\caption{\centering \textcolor{red}{TODO: " + \
+            filename.replace("_", " ")+r"}}"+"\n"
+
+    extension_pos = filename.find(".")
+    s += " "*4 + r"\label{fig:"+filename[:extension_pos]+"}\n"
+
+    s += r"\end{figure}" + "\n"
+
+    return s
+
+
+# ========================== Image ==========================
+# ========================== Link ==========================
+
+
 def check_if_link(text: str, offset: int) -> str:
 
-    # It is a title if the character after is also "["
+    # It is a link if the character after is also "["
     if text[offset+1] == "[":
         add_to_tex, local_offset = parse_link(text[offset:])
 
@@ -362,87 +383,39 @@ def parse_link(text: str) -> str:
     return add_to_tex, end_of_link+1
 
 
-def normalize_text(s: str) -> str:
-    """
-    Returns the text normalized.
-    """
-    sin_acentos = unidecode(s.strip()) 
-    underscore_por_espacios_y_puntuacion = re.sub(r'\W+','_', sin_acentos)
-    return underscore_por_espacios_y_puntuacion.lower()
+# ========================== Link ==========================
+# ========================== Highlight ==========================
+
+
+def check_if_highlight(text: str, offset: int) -> str:
     
+    # It is a highlight if the character before ">" is "\n"
+    # if text[offset-1] == "\n" and text[offset+1] == "[":
+        
 
-def TEX_macro(name: str, params: list = [], optional_params: list = []) -> str:
-    """
-    Returns a string with the macro name and its parameters.
-    """
-    macro: str = fr"\{name}"
+    # return add_to_tex, offset+local_offset
+    pass
 
-    for param in optional_params:
-        macro += "[" + str(param) + "]"
-
-    for param in params:
-        macro += "{" + str(param) + "}"
-
-    return macro
+# ========================== Highlight ==========================
+# ========================== Code ==========================
 
 
-def TEX_environment(name: str, params: list, body: str, optional_params: list = [], ) -> str:
-    """
-    Returns a string with the environment name and its parameters.
-    """
-    environment: str = "\n"+r"\begin{"+name+"}"
-
-    for param in optional_params:
-        environment += "[" + str(param) + "]"
-
-    for param in params:
-        environment += "{" + str(param) + "}"
-
-    environment += "\n"
-    environment += indent(body)
-    environment += "\n"
-
-    environment += r"\end{"+name+"}" + "\n"
-
-    return environment
+# ========================== Code ==========================
+# ========================== Numbered list ==========================
 
 
-def TEX_image(filename: str, caption: str = "") -> str:
-    s = "\n" + r"""\begin{figure}[h]
-    \centering
-    \includegraphics[width=0.6\textwidth]{./img/"""+filename+"}"+"\n"
-
-    if caption:
-        s += " "*4 + r"\caption{\centering "+caption+"}"+"\n"
-    else:
-        s += " "*4 + r"\caption{\centering \textcolor{red}{TODO: "+filename.replace("_", " ")+r"}}"+"\n"
-
-    extension_pos = filename.find(".")
-    s += " "*4 + r"\label{fig:"+filename[:extension_pos]+"}\n"
-
-    s += r"\end{figure}" + "\n"
-
-    return s
+# ========================== Numbered list ==========================
+# ========================== Table ==========================
 
 
-def indent(text: str, number_of_spaces: int = 4) -> str:
-    """
-    Returns a string with the text indented.
-    """
+# ========================== Table ==========================
+# Main
 
-    text = text.replace("\n", "\n"+" "*number_of_spaces)
-    return " "*number_of_spaces + text
+def main(md_path: str, tex_path: str) -> None:
+    md_to_tex(md_path, tex_path)
 
 
-def main():
-    md_filename = input("Enter the name of the Markdown file: ")
-    if not md_filename:
-        md_filename = "test.md"
-    elif not md_filename.endswith(".md"):
-        md_filename += ".md"
+MD_PATH = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\Markdown\test.md"
+TEX_PATH = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\LaTeX\machine-learning\nlp\nlp.tex"
 
-    path: str = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\Markdown\\"+md_filename
-    md_to_tex(path)
-
-
-main()
+main(MD_PATH, TEX_PATH)
