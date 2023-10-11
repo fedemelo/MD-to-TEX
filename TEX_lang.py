@@ -56,9 +56,7 @@ def TEX_environment(name: str, params: list, body: str, optional_params: list = 
     for param in params:
         environment += "{" + str(param) + "}"
 
-    environment += "\n"
-    environment += indent(body)
-    environment += "\n"
+    environment += "\n"+indent(body).strip()+"\n"
 
     environment += r"\end{"+name+"}" + "\n"
 

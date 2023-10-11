@@ -21,7 +21,7 @@ def md_to_tex(md_path: str, tex_path: str) -> None:
     except FileNotFoundError:
         pass
 
-    with open(tex_path, "w+") as tex_file:
+    with open(tex_path, "w") as tex_file:
         tex_file.write(parse_mkdown(md_text, md_filename))
         tex_file.close()
 
@@ -94,12 +94,11 @@ def parse_char(text: str, offset: int) -> Tuple[str, int]:
         case r"[":
             add_to_tex, offset = check_if_link(text, offset)
 
-        # TODO: Add support for the following syntaxes
         case r">":
             add_to_tex, offset = check_if_highlight(text, offset)
 
-        # case r"`":
-            # add_to_tex, offset = parse_code(text, offset)
+        case r"`":
+            add_to_tex, offset = check_if_code(text, offset)
 
         # case "0"|"1"|"2"|"3"|"4"|"5"|"6"|"7"|"8"|"9":
             # add_to_tex, offset = parse_possible_numbered_list(text, offset)
@@ -118,7 +117,7 @@ def check_if_math(text: str, offset: int) -> str:
     # It is math if the character immediately after $ is not whitespace:
     try:
         if not text[offset+1].isspace():
-            if text[offset+1] == "$" and not text[offset+2].isspace():
+            if text[offset+1] == "$":
                 add_to_tex, offset = parse_display_math(text[offset:])
             else:
                 add_to_tex, offset = parse_inline_math(text[offset:])
@@ -153,6 +152,12 @@ def parse_display_math(text: str) -> str:
     body: str = text[2:end_of_block]
 
     add_to_tex = TEX_environment("equation*", [], body)
+
+    if r"\begin{gather}" in add_to_tex:
+        add_to_tex = add_to_tex.replace(r"\begin{gather}", r"\begin{gather*}")
+        add_to_tex = add_to_tex.replace(r"\end{gather}", r"\end{gather*}")
+        add_to_tex = add_to_tex.replace(r"\begin{equation*}", "")
+        add_to_tex = add_to_tex.replace(r"\end{equation*}", "")
 
     return add_to_tex, end_of_block+2
 
@@ -260,14 +265,11 @@ def check_if_list(text: str, offset: int) -> str:
         if text[offset-1] == "\n" and text[offset+1] in (" "):
             # The text is given as "\n- Item..."
             add_to_tex, local_offset = parse_list(text[offset-1:])
+            return add_to_tex, offset+local_offset
         else:
-            add_to_tex = "-"
-            local_offset = 1
+            return "-", 1
     except IndexError:
-        add_to_tex = "-"
-        local_offset = 1
-
-    return add_to_tex, offset+local_offset
+        return "-", 1
 
 
 def parse_list(text: str) -> str:
@@ -319,8 +321,8 @@ def parse_image(text: str) -> str:
     """
     end_of_alt_text = text.find(r"]]")
     filename = text[3:end_of_alt_text]
-    has_size = text.find(r"|")
-    filename = filename if has_size == -1 else filename[:has_size]
+    if filename.__contains__("|"):
+        filename = filename[:filename.find(r"|")]
 
     add_to_tex = TEX_image(filename)
 
@@ -388,16 +390,117 @@ def parse_link(text: str) -> str:
 
 
 def check_if_highlight(text: str, offset: int) -> str:
-    
-    # It is a highlight if the character before ">" is "\n"
-    # if text[offset-1] == "\n" and text[offset+1] == "[":
-        
 
-    # return add_to_tex, offset+local_offset
-    pass
+    # It is a highlight if the character before ">" is "\n"
+    if text[offset-1] == "\n":
+        add_to_tex, local_offset = parse_highlight(text[offset:])
+
+    else:
+        add_to_tex = ">"
+        local_offset = 1
+
+    return add_to_tex, offset+local_offset
+
+
+def parse_highlight(text: str) -> str:
+    """
+    E.g. 
+> [!tip] Teorema de Erdös-Gallai
+>Sea tal cosa $A$ y tal otra $B$."
+    """
+    open_square_bracket = text.find("[")
+    if open_square_bracket == -1 or text[open_square_bracket+1] != "!":
+        name_of_highlight = ""
+
+    close_square_bracket = text.find("]")
+    # type_of_highlight = text[open_square_bracket+2:close_square_bracket]
+    end_of_line = text.find("\n")
+    name_of_highlight = text[close_square_bracket+1:end_of_line]
+
+    content_start = end_of_line+1
+    line_start = content_start
+
+    previous_char = "\n"
+    char = text[line_start]
+    while previous_char == "\n" and char == ">":
+        previous_char_pos = text.find("\n", line_start)
+        previous_char = text[previous_char_pos]
+        line_start = previous_char_pos+1
+        char = text[line_start]
+    # This cicle ends as soon as a line starts with something other than ">"
+
+    end_of_highlight = line_start
+    content = TEXify_block(text[content_start+1:end_of_highlight])
+    highlight_content =  " ".join(content.split("\n>"))
+
+    normalized_name = normalize_text(name_of_highlight)
+
+    if "definicion.lower()" in normalized_name:
+        add_to_tex = TEX_environment("definicion", [
+            name_of_highlight.strip(), f"def:{normalized_name}"], highlight_content)
+    elif "notacion.lower()" in normalized_name:
+        add_to_tex = TEX_environment("notacion", [
+            name_of_highlight.strip(), f"not:{normalized_name}"], highlight_content)
+    elif "ejemplo.lower()" in normalized_name:
+        add_to_tex = TEX_environment("ejemplo", [
+            name_of_highlight.strip(), f"ej:{normalized_name}"], highlight_content)
+    else:
+        add_to_tex = TEX_environment("teorema", [
+            name_of_highlight.strip(), f"thm:{normalized_name}"], highlight_content)
+        
+    return add_to_tex, end_of_highlight
+
 
 # ========================== Highlight ==========================
 # ========================== Code ==========================
+
+def check_if_code(text: str, offset: int) -> str:
+
+    # It is a code block if the characters are "```"
+    if text[offset+1] == "`" and text[offset+2] == "`":
+        add_to_tex, local_offset = parse_code_block(text[offset+3:])
+
+    else:
+        add_to_tex, local_offset = parse_code(text[offset+1:])
+
+    return add_to_tex, offset+local_offset
+
+
+def parse_code_block(text: str) -> str:
+    """
+    E.g.
+```
+    code
+```
+    """
+    end_of_block = text.find("```")
+
+    if text[0] != "\n":
+        end_of_line = text.find("\n")
+        language = text[:end_of_line]
+        code = text[end_of_line+1:end_of_block-1]
+    else:
+        language = ""
+        code = text[1:end_of_block-1]
+
+    language = "JavaScript" if normalize_text(language) in ["js", "jsx", "tsx", "ts"] else language
+    optional_params = [f"language={language}"] if language else []
+
+    add_to_tex = TEX_environment("lstlisting", [], code, optional_params)
+
+    return add_to_tex, end_of_block+3
+
+
+def parse_code(text: str) -> str:
+    """
+    E.g. `code`
+    """
+    end_of_block = text.find("`")
+    code = text[:end_of_block]
+
+    add_to_tex = r"\verb|"+code+r"|"
+
+    return add_to_tex, end_of_block+1
 
 
 # ========================== Code ==========================
@@ -416,6 +519,6 @@ def main(md_path: str, tex_path: str) -> None:
 
 
 MD_PATH = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\Markdown\test.md"
-TEX_PATH = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\LaTeX\machine-learning\nlp\nlp.tex"
+TEX_PATH = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\LaTeX\matematica\grafos\grafos.tex"
 
 main(MD_PATH, TEX_PATH)
