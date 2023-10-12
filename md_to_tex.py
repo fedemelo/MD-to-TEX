@@ -414,24 +414,23 @@ def parse_highlight(text: str) -> str:
 
     close_square_bracket = text.find("]")
     # type_of_highlight = text[open_square_bracket+2:close_square_bracket]
-    end_of_line = text.find("\n")
-    name_of_highlight = text[close_square_bracket+1:end_of_line]
+    end_of_line_pos = text.find("\n")
+    name_of_highlight = text[close_square_bracket+1:end_of_line_pos].strip()
 
-    content_start = end_of_line+1
-    line_start = content_start
+    highlight_start = end_of_line_pos+1
+    end_of_line = text[end_of_line_pos]
+    char = text[highlight_start]
 
-    previous_char = "\n"
-    char = text[line_start]
-    while previous_char == "\n" and char == ">":
-        previous_char_pos = text.find("\n", line_start)
-        previous_char = text[previous_char_pos]
-        line_start = previous_char_pos+1
-        char = text[line_start]
+    while end_of_line == "\n" and char == ">":
+        end_of_line_pos = text.find("\n", end_of_line_pos+1)
+        end_of_line = text[end_of_line_pos]
+        char = text[end_of_line_pos+1]
     # This cicle ends as soon as a line starts with something other than ">"
 
-    end_of_highlight = line_start
-    content = TEXify_block(text[content_start+1:end_of_highlight])
-    highlight_content =  " ".join(content.split("\n>"))
+    end_of_highlight = end_of_line_pos+1
+    content = text[highlight_start+1:end_of_highlight]
+    content = content.replace(r">", "")
+    highlight_content = TEXify_block(content)
 
     normalized_name = normalize_text(name_of_highlight)
 
@@ -486,7 +485,7 @@ def parse_code_block(text: str) -> str:
     language = "JavaScript" if normalize_text(language) in ["js", "jsx", "tsx", "ts"] else language
     optional_params = [f"language={language}"] if language else []
 
-    add_to_tex = TEX_environment("lstlisting", [], code, optional_params)
+    add_to_tex = TEX_environment("lstlisting", [], code, optional_params, indentation=False)
 
     return add_to_tex, end_of_block+3
 
@@ -518,7 +517,7 @@ def main(md_path: str, tex_path: str) -> None:
     md_to_tex(md_path, tex_path)
 
 
-MD_PATH = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\Markdown\test.md"
+MD_PATH = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\Markdown\Grafos\Teoría de Grafos.md"
 TEX_PATH = r"C:\Users\feder\OneDrive - Universidad de los Andes\Académico\Apuntes\LaTeX\matematica\grafos\grafos.tex"
 
 main(MD_PATH, TEX_PATH)

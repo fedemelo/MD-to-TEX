@@ -44,7 +44,7 @@ def TEX_macro(name: str, params: list = [], optional_params: list = []) -> str:
     return macro
 
 
-def TEX_environment(name: str, params: list, body: str, optional_params: list = [], ) -> str:
+def TEX_environment(name: str, params: list, body: str, optional_params: list=[], indentation=True) -> str:
     """
     Returns a string with the environment name and its parameters.
     """
@@ -56,7 +56,10 @@ def TEX_environment(name: str, params: list, body: str, optional_params: list = 
     for param in params:
         environment += "{" + str(param) + "}"
 
-    environment += "\n"+indent(body).strip()+"\n"
+    if indentation:
+        environment += "\n"+indent(body).strip()+"\n"
+    else:
+        environment += "\n"+body.strip()+"\n"
 
     environment += r"\end{"+name+"}" + "\n"
 
